@@ -24,6 +24,22 @@ npm run dev
 Open the development server URL shown in your terminal (default:
 <http://localhost:5173/>) to interact with the app.
 
+## Deployment
+
+This project is configured to deploy automatically to GitHub Pages whenever new
+commits are pushed to the `main` branch.
+
+1. Go to your repository settings in GitHub and enable **Pages** with the
+   "GitHub Actions" source.
+2. The included `Deploy to GitHub Pages` workflow will build the Vite project
+   and publish the contents of the `dist/` directory.
+3. The published site will be available at
+   `https://<username>.github.io/<repository>/`.
+
+When building locally, Vite serves the site from the root path. During CI
+deployments the Vite `base` configuration automatically adjusts to the
+repository name so assets resolve correctly under the GitHub Pages subpath.
+
 ### Available scripts
 
 - `npm run dev` – start the Vite development server.
