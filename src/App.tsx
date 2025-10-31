@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import YouTube from 'react-youtube'
 import type { YouTubeEvent, YouTubePlayer } from 'react-youtube'
 import './App.css'
@@ -10,6 +10,7 @@ type PointOfInterest = {
   column: number
   xPercent: number
   yPercent: number
+  note?: string
 }
 
 const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'
@@ -78,6 +79,7 @@ function App() {
   const [points, setPoints] = useState<PointOfInterest[]>([])
   const [copyFeedback, setCopyFeedback] = useState<string>('')
   const [isPlayerReady, setIsPlayerReady] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
 
   const playerRef = useRef<YouTubePlayer | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -164,6 +166,7 @@ function App() {
           column: columnIndex + 1,
           xPercent,
           yPercent,
+          note: '',
         }
 
         setPoints((previous) =>
@@ -206,6 +209,52 @@ function App() {
   const toggleGridVisibility = () => {
     setIsGridVisible((value) => !value)
   }
+
+  useEffect(() => {
+    if (!isPlayerReady || !playerRef.current) {
+      setCurrentTime(0)
+      return
+    }
+
+    let animationFrame: number
+
+    const updateCurrentTime = () => {
+      if (playerRef.current) {
+        const time = playerRef.current.getCurrentTime?.() ?? 0
+        setCurrentTime(time)
+      }
+
+      animationFrame = window.requestAnimationFrame(updateCurrentTime)
+    }
+
+    animationFrame = window.requestAnimationFrame(updateCurrentTime)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+    }
+  }, [isPlayerReady])
+
+  const handleNoteChange = useCallback(
+    (id: number) => (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value
+      setPoints((previous) =>
+        previous.map((point) => (point.id === id ? { ...point, note: value } : point)),
+      )
+      setCopyFeedback('')
+    },
+    [],
+  )
+
+  const activePoints = useMemo(() => {
+    const tolerance = 0.5
+    return points.filter((point) => {
+      if (!point.note || !point.note.trim()) {
+        return false
+      }
+
+      return Math.abs(point.time - currentTime) <= tolerance
+    })
+  }, [points, currentTime])
 
   const gridCells = useMemo(() => {
     return Array.from({ length: rows * columns }, (_, index) => {
@@ -336,6 +385,20 @@ function App() {
                 aria-hidden="true"
               />
             ))}
+            {activePoints.map((point) => (
+              <div
+                key={`note-${point.id}`}
+                className="poi-note"
+                style={{
+                  left: `${point.xPercent}%`,
+                  top: `${point.yPercent}%`,
+                }}
+                role="status"
+              >
+                <span className="poi-note__time">{formatTimecode(point.time)}</span>
+                <span className="poi-note__content">{point.note}</span>
+              </div>
+            ))}
           </div>
         </div>
         {!isPlayerReady ? (
@@ -382,6 +445,7 @@ function App() {
                   <th scope="col">Column</th>
                   <th scope="col">X (%)</th>
                   <th scope="col">Y (%)</th>
+                  <th scope="col">Note</th>
                   <th scope="col" className="points-table__actions" aria-label="Actions" />
                 </tr>
               </thead>
@@ -393,6 +457,15 @@ function App() {
                     <td>{point.column}</td>
                     <td>{point.xPercent.toFixed(1)}</td>
                     <td>{point.yPercent.toFixed(1)}</td>
+                    <td>
+                      <textarea
+                        value={point.note ?? ''}
+                        onChange={handleNoteChange(point.id)}
+                        placeholder="Add a note…"
+                        className="points-table__note"
+                        rows={2}
+                      />
+                    </td>
                     <td className="points-table__actions">
                       <button
                         type="button"

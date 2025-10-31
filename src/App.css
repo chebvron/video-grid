@@ -231,6 +231,47 @@
   pointer-events: none;
 }
 
+.poi-note {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 16px));
+  min-width: 160px;
+  max-width: 220px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+  font-size: 0.85rem;
+}
+
+.poi-note::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+}
+
+.poi-note__time {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #cbd5f5;
+}
+
+.poi-note__content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .helper {
   margin: 0;
   font-size: 0.95rem;
@@ -271,6 +312,28 @@
 .points-table__actions {
   text-align: right;
   white-space: nowrap;
+}
+
+.points-table__note {
+  width: 100%;
+  min-width: 140px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 0.5rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: #f8fafc;
+  color: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.points-table__note:focus,
+.points-table__note:hover {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  background: #ffffff;
 }
 
 @media (max-width: 768px) {
