@@ -80,6 +80,7 @@ function App() {
   const [copyFeedback, setCopyFeedback] = useState<string>('')
   const [isPlayerReady, setIsPlayerReady] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
 
   const playerRef = useRef<YouTubePlayer | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -109,6 +110,10 @@ function App() {
   const handlePlayerReady = (event: YouTubeEvent) => {
     playerRef.current = event.target
     setIsPlayerReady(true)
+    const initialDuration = event.target.getDuration?.() ?? 0
+    if (initialDuration > 0) {
+      setDuration(initialDuration)
+    }
   }
 
   const handleVideoSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -222,6 +227,11 @@ function App() {
       if (playerRef.current) {
         const time = playerRef.current.getCurrentTime?.() ?? 0
         setCurrentTime(time)
+
+        const totalDuration = playerRef.current.getDuration?.() ?? 0
+        if (totalDuration > 0) {
+          setDuration(totalDuration)
+        }
       }
 
       animationFrame = window.requestAnimationFrame(updateCurrentTime)
@@ -249,6 +259,14 @@ function App() {
     const tolerance = 0.5
     return points.filter((point) => Math.abs(point.time - currentTime) <= tolerance)
   }, [points, currentTime])
+
+  const playbackProgress = useMemo(() => {
+    if (!duration) {
+      return 0
+    }
+
+    return Math.min(100, Math.max(0, (currentTime / duration) * 100))
+  }, [currentTime, duration])
 
   const activeNotes = useMemo(
     () => activePoints.filter((point) => point.note && point.note.trim()),
@@ -373,31 +391,49 @@ function App() {
             data-ready={isPlayerReady}
           >
             {isGridVisible ? gridCells : null}
-            {activePoints.map((point) => (
-              <div
-                key={`marker-${point.id}`}
-                className="poi-marker"
-                style={{
-                  left: `${point.xPercent}%`,
-                  top: `${point.yPercent}%`,
-                }}
-                aria-hidden="true"
-              />
-            ))}
-            {activeNotes.map((point) => (
-              <div
-                key={`note-${point.id}`}
-                className="poi-note"
-                style={{
-                  left: `${point.xPercent}%`,
-                  top: `${point.yPercent}%`,
-                }}
-                role="status"
-              >
-                <span className="poi-note__time">{formatTimecode(point.time)}</span>
-                <span className="poi-note__content">{point.note}</span>
-              </div>
-            ))}
+          </div>
+        </div>
+        <div className="timeline" aria-label="Captured timeline">
+          <div className="timeline__track">
+            <div
+              className="timeline__progress"
+              style={{ width: `${playbackProgress}%` }}
+              aria-hidden="true"
+            />
+            {activePoints.map((point) => {
+              const position = duration
+                ? Math.min(100, Math.max(0, (point.time / duration) * 100))
+                : 0
+              return (
+                <div
+                  key={`marker-${point.id}`}
+                  className="timeline__marker"
+                  style={{ left: `${position}%` }}
+                  role="status"
+                  aria-label={`Row ${point.row}, Column ${point.column} at ${formatTimecode(point.time)}`}
+                >
+                  <span className="timeline__marker-label">R{point.row} · C{point.column}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="timeline__callouts">
+            {activeNotes.map((point) => {
+              const position = duration
+                ? Math.min(100, Math.max(0, (point.time / duration) * 100))
+                : 0
+              return (
+                <div
+                  key={`note-${point.id}`}
+                  className="timeline__note"
+                  style={{ left: `${position}%` }}
+                >
+                  <span className="timeline__note-time">{formatTimecode(point.time)}</span>
+                  <span className="timeline__note-coordinates">Row {point.row}, Column {point.column}</span>
+                  <span className="timeline__note-content">{point.note}</span>
+                </div>
+              )
+            })}
           </div>
         </div>
         {!isPlayerReady ? (

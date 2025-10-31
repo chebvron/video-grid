@@ -219,55 +219,83 @@
   outline-offset: -1px;
 }
 
-.poi-marker {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: #38bdf8;
-  border: 2px solid rgba(15, 23, 42, 0.85);
-  transform: translate(-50%, -50%);
-  box-shadow: 0 4px 12px rgba(8, 47, 73, 0.45);
-  pointer-events: none;
+.timeline {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  position: relative;
 }
 
-.poi-note {
+.timeline__track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.3);
+  overflow: hidden;
+}
+
+.timeline__progress {
   position: absolute;
-  transform: translate(-50%, calc(-100% - 16px));
-  min-width: 160px;
-  max-width: 220px;
-  padding: 0.6rem 0.75rem;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.85);
+  inset: 0;
+  background: linear-gradient(90deg, #38bdf8, #6366f1);
+}
+
+.timeline__marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.25);
+  white-space: nowrap;
+}
+
+.timeline__marker-label {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.timeline__callouts {
+  position: relative;
+  min-height: 64px;
+  width: 100%;
+}
+
+.timeline__note {
+  position: absolute;
+  top: 0;
+  max-width: min(320px, 80%);
+  padding: 0.75rem 0.85rem;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
   color: #f8fafc;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.35);
-  pointer-events: none;
+  gap: 0.45rem;
   font-size: 0.85rem;
-}
-
-.poi-note::after {
-  content: '';
-  position: absolute;
-  bottom: -8px;
-  left: 50%;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
   transform: translateX(-50%);
-  width: 12px;
-  height: 12px;
-  background: inherit;
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
 
-.poi-note__time {
+.timeline__note-time {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #cbd5f5;
 }
 
-.poi-note__content {
+.timeline__note-coordinates {
+  font-weight: 600;
+  color: #bfdbfe;
+}
+
+.timeline__note-content {
   white-space: pre-wrap;
   word-break: break-word;
 }
