@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import YouTube from 'react-youtube'
 import type { YouTubeEvent, YouTubePlayer } from 'react-youtube'
 import './App.css'
@@ -10,6 +10,7 @@ type PointOfInterest = {
   column: number
   xPercent: number
   yPercent: number
+  note: string
 }
 
 const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'
@@ -78,6 +79,8 @@ function App() {
   const [points, setPoints] = useState<PointOfInterest[]>([])
   const [copyFeedback, setCopyFeedback] = useState<string>('')
   const [isPlayerReady, setIsPlayerReady] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
 
   const playerRef = useRef<YouTubePlayer | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -164,6 +167,7 @@ function App() {
           column: columnIndex + 1,
           xPercent,
           yPercent,
+          note: '',
         }
 
         setPoints((previous) =>
@@ -222,6 +226,78 @@ function App() {
       )
     })
   }, [rows, columns, recordPoint])
+
+  const activePoints = useMemo(() => {
+    const DISPLAY_WINDOW = 1.5
+    return points.filter(
+      (point) => Math.abs(point.time - currentTime) <= DISPLAY_WINDOW / 2,
+    )
+  }, [points, currentTime])
+
+  const timelineMarkers = useMemo(() => {
+    if (!duration) {
+      return [] as Array<{ id: number; left: number; isActive: boolean }>
+    }
+
+    return points.map((point) => ({
+      id: point.id,
+      left: (point.time / duration) * 100,
+      isActive: activePoints.some((active) => active.id === point.id),
+    }))
+  }, [points, duration, activePoints])
+
+  useEffect(() => {
+    if (!isPlayerReady || !playerRef.current) {
+      return undefined
+    }
+
+    let frameId: number
+
+    const updateTime = () => {
+      const player = playerRef.current
+      if (player) {
+        const newTime = player.getCurrentTime?.() ?? 0
+        const newDuration = player.getDuration?.() ?? 0
+
+        setCurrentTime((previous) =>
+          Math.abs(previous - newTime) > 0.02 ? newTime : previous,
+        )
+        setDuration((previous) =>
+          Math.abs(previous - newDuration) > 0.1 ? newDuration : previous,
+        )
+      }
+
+      frameId = requestAnimationFrame(updateTime)
+    }
+
+    frameId = requestAnimationFrame(updateTime)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+    }
+  }, [isPlayerReady])
+
+  const progressPercent = useMemo(() => {
+    if (!duration) {
+      return 0
+    }
+
+    return Math.min(100, Math.max(0, (currentTime / duration) * 100))
+  }, [currentTime, duration])
+
+  const updateNote = (id: number, note: string) => {
+    setPoints((previous) =>
+      previous.map((point) =>
+        point.id === id
+          ? {
+              ...point,
+              note,
+            }
+          : point,
+      ),
+    )
+    setCopyFeedback('')
+  }
 
   return (
     <div className="app">
@@ -325,7 +401,7 @@ function App() {
             data-ready={isPlayerReady}
           >
             {isGridVisible ? gridCells : null}
-            {points.map((point) => (
+            {activePoints.map((point) => (
               <div
                 key={`marker-${point.id}`}
                 className="poi-marker"
@@ -336,8 +412,47 @@ function App() {
                 aria-hidden="true"
               />
             ))}
+            {activePoints
+              .filter((point) => point.note.trim().length > 0)
+              .map((point) => (
+                <div
+                  key={`callout-${point.id}`}
+                  className="poi-callout"
+                  style={{
+                    left: `${point.xPercent}%`,
+                    top: `${point.yPercent}%`,
+                  }}
+                  role="status"
+                >
+                  <span className="poi-callout__time">
+                    {formatTimecode(point.time)}
+                  </span>
+                  <span className="poi-callout__note">{point.note}</span>
+                </div>
+              ))}
           </div>
         </div>
+        {duration > 0 ? (
+          <div className="timeline" aria-hidden="true">
+            <div className="timeline__track">
+              <div
+                className="timeline__progress"
+                style={{ width: `${progressPercent}%` }}
+              />
+              {timelineMarkers.map((marker) => (
+                <div
+                  key={`marker-${marker.id}`}
+                  className={
+                    marker.isActive
+                      ? 'timeline__marker timeline__marker--active'
+                      : 'timeline__marker'
+                  }
+                  style={{ left: `${marker.left}%` }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
         {!isPlayerReady ? (
           <p className="helper helper--muted">
             Loading player… Click the grid once the video is ready.
@@ -382,6 +497,7 @@ function App() {
                   <th scope="col">Column</th>
                   <th scope="col">X (%)</th>
                   <th scope="col">Y (%)</th>
+                  <th scope="col">Note</th>
                   <th scope="col" className="points-table__actions" aria-label="Actions" />
                 </tr>
               </thead>
@@ -393,6 +509,15 @@ function App() {
                     <td>{point.column}</td>
                     <td>{point.xPercent.toFixed(1)}</td>
                     <td>{point.yPercent.toFixed(1)}</td>
+                    <td className="points-table__note">
+                      <input
+                        type="text"
+                        className="field__input field__input--inline"
+                        value={point.note}
+                        onChange={(event) => updateNote(point.id, event.target.value)}
+                        placeholder="Add a note"
+                      />
+                    </td>
                     <td className="points-table__actions">
                       <button
                         type="button"
