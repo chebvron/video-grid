@@ -247,14 +247,13 @@ function App() {
 
   const activePoints = useMemo(() => {
     const tolerance = 0.5
-    return points.filter((point) => {
-      if (!point.note || !point.note.trim()) {
-        return false
-      }
-
-      return Math.abs(point.time - currentTime) <= tolerance
-    })
+    return points.filter((point) => Math.abs(point.time - currentTime) <= tolerance)
   }, [points, currentTime])
+
+  const activeNotes = useMemo(
+    () => activePoints.filter((point) => point.note && point.note.trim()),
+    [activePoints],
+  )
 
   const gridCells = useMemo(() => {
     return Array.from({ length: rows * columns }, (_, index) => {
@@ -374,7 +373,7 @@ function App() {
             data-ready={isPlayerReady}
           >
             {isGridVisible ? gridCells : null}
-            {points.map((point) => (
+            {activePoints.map((point) => (
               <div
                 key={`marker-${point.id}`}
                 className="poi-marker"
@@ -385,7 +384,7 @@ function App() {
                 aria-hidden="true"
               />
             ))}
-            {activePoints.map((point) => (
+            {activeNotes.map((point) => (
               <div
                 key={`note-${point.id}`}
                 className="poi-note"
