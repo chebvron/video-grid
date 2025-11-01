@@ -114,6 +114,7 @@ function App() {
   const [readyMap, setReadyMap] = useState<Record<string, boolean>>({})
   const [copyFeedback, setCopyFeedback] = useState('')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [inlineEditors, setInlineEditors] = useState<Record<string, number | null>>({})
   const [activeVideoId, setActiveVideoId] = useState(() =>
     DEFAULT_FEED.at(0)?.videoId ?? '',
   )
@@ -221,6 +222,37 @@ function App() {
     setIsDrawerOpen(true)
   }
 
+  const openInlineComposer = useCallback((videoId: string, pointId: number) => {
+    setInlineEditors((previous) => ({
+      ...previous,
+      [videoId]: pointId,
+    }))
+    setActiveVideoId(videoId)
+    setCopyFeedback('')
+  }, [])
+
+  const closeInlineComposer = useCallback((videoId: string) => {
+    setInlineEditors((previous) => ({
+      ...previous,
+      [videoId]: null,
+    }))
+  }, [])
+
+  const handlePointActivate = useCallback(
+    (videoId: string, pointId: number, { seek = false }: { seek?: boolean } = {}) => {
+      if (seek) {
+        const target = (pointsByVideo[videoId] ?? []).find((point) => point.id === pointId)
+        const player = playersRef.current[videoId]
+        if (player && target) {
+          player.seekTo?.(target.time, true)
+        }
+      }
+
+      openInlineComposer(videoId, pointId)
+    },
+    [openInlineComposer, pointsByVideo],
+  )
+
   const handleAddVideo = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const id = extractVideoId(videoInput)
@@ -263,6 +295,11 @@ function App() {
     })
     delete playersRef.current[videoId]
     delete overlayRefs.current[videoId]
+
+    setInlineEditors((previous) => {
+      const { [videoId]: _removed, ...rest } = previous
+      return rest
+    })
 
     setActiveVideoId((current) => {
       if (current === videoId) {
@@ -333,10 +370,48 @@ function App() {
             [videoId]: nextPoints,
           }
         })
-        setCopyFeedback('')
-        setActiveVideoId(videoId)
+
+        openInlineComposer(videoId, newPoint.id)
       },
-    [columns, rows, readyMap],
+    [columns, rows, readyMap, openInlineComposer],
+  )
+
+  const handleQuickNote = useCallback(
+    (videoId: string) => {
+      const player = playersRef.current[videoId]
+      if (!player || !readyMap[videoId]) {
+        return
+      }
+
+      const currentTime = player.getCurrentTime?.() ?? 0
+      idCounter.current += 1
+      const centerRow = Math.ceil(rows / 2)
+      const centerColumn = Math.ceil(columns / 2)
+      const newPoint: PointOfInterest = {
+        id: idCounter.current,
+        time: currentTime,
+        row: centerRow,
+        column: centerColumn,
+        xPercent: 50,
+        yPercent: 50,
+        note: '',
+      }
+
+      setPointsByVideo((previous) => {
+        const nextPoints = [
+          ...(previous[videoId] ?? []),
+          newPoint,
+        ].sort((a, b) => a.time - b.time)
+
+        return {
+          ...previous,
+          [videoId]: nextPoints,
+        }
+      })
+
+      openInlineComposer(videoId, newPoint.id)
+    },
+    [openInlineComposer, readyMap, rows, columns],
   )
 
   const removePoint = (videoId: string, id: number) => {
@@ -347,6 +422,14 @@ function App() {
         [videoId]: next,
       }
     })
+    setInlineEditors((previous) =>
+      previous[videoId] === id
+        ? {
+            ...previous,
+            [videoId]: null,
+          }
+        : previous,
+    )
     setCopyFeedback('')
   }
 
@@ -355,6 +438,14 @@ function App() {
       ...previous,
       [videoId]: [],
     }))
+    setInlineEditors((previous) =>
+      previous[videoId]
+        ? {
+            ...previous,
+            [videoId]: null,
+          }
+        : previous,
+    )
     setCopyFeedback('')
   }
 
@@ -397,6 +488,28 @@ function App() {
     setCopyFeedback('')
   }
 
+  useEffect(() => {
+    setInlineEditors((previous) => {
+      let changed = false
+      const next = { ...previous }
+
+      for (const videoId of Object.keys(previous)) {
+        const activeId = previous[videoId]
+        if (activeId == null) {
+          continue
+        }
+
+        const hasPoint = (pointsByVideo[videoId] ?? []).some((point) => point.id === activeId)
+        if (!hasPoint) {
+          next[videoId] = null
+          changed = true
+        }
+      }
+
+      return changed ? next : previous
+    })
+  }, [pointsByVideo])
+
   const activeVideo = videos.find((video) => video.videoId === activeVideoId) ?? null
   const activePoints = activeVideo ? pointsByVideo[activeVideo.videoId] ?? [] : []
 
@@ -419,14 +532,28 @@ function App() {
           videos.map((video) => {
             const videoPoints = pointsByVideo[video.videoId] ?? []
             const timeInfo = timeState[video.videoId] ?? { currentTime: 0, duration: 0 }
-            const displayedPoints = videoPoints.filter(
+            const editingPointId = inlineEditors[video.videoId] ?? null
+            const editingPoint =
+              editingPointId != null
+                ? videoPoints.find((point) => point.id === editingPointId) ?? null
+                : null
+
+            let displayedPoints = videoPoints.filter(
               (point) => Math.abs(point.time - timeInfo.currentTime) <= 0.75,
             )
+            if (
+              editingPoint &&
+              !displayedPoints.some((point) => point.id === editingPoint.id)
+            ) {
+              displayedPoints = [...displayedPoints, editingPoint]
+            }
             const timelineMarkers = timeInfo.duration
               ? videoPoints.map((point) => ({
                   id: point.id,
                   left: (point.time / timeInfo.duration) * 100,
                   isActive: displayedPoints.some((active) => active.id === point.id),
+                  isEditing: editingPointId === point.id,
+                  label: formatTimecode(point.time),
                 }))
               : []
             const progressPercent = timeInfo.duration
@@ -486,25 +613,86 @@ function App() {
                           })
                         : null}
                       {displayedPoints.map((point) => (
-                        <div
+                        <button
                           key={`marker-${point.id}`}
-                          className="poi-marker"
+                          type="button"
+                          className={`poi-marker${
+                            editingPointId === point.id ? ' poi-marker--editing' : ''
+                          }`}
                           style={{
                             left: `${point.xPercent}%`,
                             top: `${point.yPercent}%`,
                           }}
-                          role="status"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handlePointActivate(video.videoId, point.id)
+                          }}
+                          aria-label={`Edit note at ${formatTimecode(point.time)}`}
                         >
+                          <span className="sr-only">
+                            Note at {formatTimecode(point.time)} located in row {point.row}, column{' '}
+                            {point.column}
+                          </span>
+                          <span aria-hidden="true" className="poi-marker__dot" />
                           <div className="poi-callout">
                             <span className="poi-callout__time">
                               {formatTimecode(point.time)}
                             </span>
                             <span className="poi-callout__note">{point.note}</span>
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
+                  {editingPoint ? (
+                    <div className="inline-composer" role="dialog" aria-label="Inline annotation editor">
+                      <div className="inline-composer__header">
+                        <span className="inline-composer__badge">Live note</span>
+                        <button
+                          type="button"
+                          className="inline-composer__close"
+                          onClick={() => closeInlineComposer(video.videoId)}
+                        >
+                          Done
+                        </button>
+                      </div>
+                      <div className="inline-composer__meta">
+                        <span className="inline-composer__time">
+                          Captured {formatTimecode(editingPoint.time)}
+                        </span>
+                        <span className="inline-composer__grid">
+                          Row {editingPoint.row} · Col {editingPoint.column}
+                        </span>
+                      </div>
+                      <div className="inline-composer__live">
+                        <span className="inline-composer__pulse" aria-hidden="true" />
+                        <span className="inline-composer__live-label">
+                          Playing {formatTimecode(timeInfo.currentTime)}
+                        </span>
+                      </div>
+                      <label className="inline-composer__label">
+                        <span className="sr-only">Update note text</span>
+                        <textarea
+                          className="inline-composer__input"
+                          value={editingPoint.note}
+                          onChange={(event) =>
+                            updateNote(video.videoId, editingPoint.id, event.target.value)
+                          }
+                          placeholder="Jot a thought while the video keeps rolling..."
+                          rows={3}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-composer__cta"
+                      onClick={() => handleQuickNote(video.videoId)}
+                      disabled={!readyMap[video.videoId]}
+                    >
+                      <span aria-hidden="true">✦</span> Quick note
+                    </button>
+                  )}
                   {timeInfo.duration ? (
                     <div className="timeline" aria-hidden="true">
                       <div className="timeline__track">
@@ -513,14 +701,15 @@ function App() {
                           style={{ width: `${progressPercent}%` }}
                         />
                         {timelineMarkers.map((marker) => (
-                          <div
+                          <button
                             key={`marker-${marker.id}`}
-                            className={
-                              marker.isActive
-                                ? 'timeline__marker timeline__marker--active'
-                                : 'timeline__marker'
-                            }
+                            type="button"
+                            className={`timeline__marker${
+                              marker.isActive ? ' timeline__marker--active' : ''
+                            }${marker.isEditing ? ' timeline__marker--editing' : ''}`}
                             style={{ left: `${marker.left}%` }}
+                            onClick={() => handlePointActivate(video.videoId, marker.id, { seek: true })}
+                            aria-label={`Jump to note at ${marker.label}`}
                           />
                         ))}
                       </div>
