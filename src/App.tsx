@@ -110,7 +110,7 @@ function App() {
   const overlayRefs = useRef(new Map<string, HTMLDivElement | null>())
   const playerRefs = useRef(new Map<string, YouTubePlayer>())
 
-  const youTubeOptions = useMemo(
+  const baseYouTubeOptions = useMemo(
     () => ({
       width: '100%',
       height: '100%',
@@ -120,6 +120,7 @@ function App() {
         rel: 0,
         playsinline: 1,
         fs: 0,
+        loop: 1,
       },
     }),
     [],
@@ -282,6 +283,21 @@ function App() {
         const player = event.target
         player.mute()
         playerRefs.current.set(key, player)
+
+        if (key === activeVideoKey) {
+          player.playVideo?.()
+        } else {
+          player.pauseVideo?.()
+        }
+      },
+    [activeVideoKey],
+  )
+
+  const handleVideoEnd = useCallback(
+    (key: string) =>
+      (event: YouTubeEvent) => {
+        const player = event.target
+        player.seekTo?.(0)
 
         if (key === activeVideoKey) {
           player.playVideo?.()
@@ -520,8 +536,15 @@ function App() {
                 <div className="video-stage__frame" style={{ paddingTop: GRID_PADDING_PERCENT }}>
                   <YouTube
                     videoId={video.videoId}
-                    opts={youTubeOptions}
+                    opts={{
+                      ...baseYouTubeOptions,
+                      playerVars: {
+                        ...(baseYouTubeOptions.playerVars ?? {}),
+                        playlist: video.videoId,
+                      },
+                    }}
                     onReady={handlePlayerReady(video.key)}
+                    onEnd={handleVideoEnd(video.key)}
                     className="video-stage__player"
                     iframeClassName="video-stage__player"
                   />
