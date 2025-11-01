@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { ChangeEvent, FormEvent, MouseEvent } from 'react'
 import YouTube from 'react-youtube'
 import type { YouTubeEvent, YouTubePlayer } from 'react-youtube'
 import './App.css'
@@ -15,6 +22,13 @@ type PointOfInterest = {
 
 type VideoOrientation = 'landscape' | 'portrait'
 
+type VideoItem = {
+  id: string
+  videoId: string
+  source: string
+  orientation: VideoOrientation
+}
+
 const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'
 const DEFAULT_VIDEO_URL = `https://www.youtube.com/watch?v=${DEFAULT_VIDEO_ID}`
 const MIN_GRID_SIZE = 1
@@ -23,6 +37,20 @@ const ORIENTATION_PADDING: Record<VideoOrientation, string> = {
   landscape: '56.25%',
   portrait: '177.78%',
 }
+
+const DEFAULT_FEED: Array<Omit<VideoItem, 'id'>> = [
+  { videoId: DEFAULT_VIDEO_ID, source: DEFAULT_VIDEO_URL, orientation: 'landscape' },
+  {
+    videoId: 'aqz-KE-bpKQ',
+    source: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+    orientation: 'landscape',
+  },
+  {
+    videoId: '5qap5aO4i9A',
+    source: 'https://www.youtube.com/watch?v=5qap5aO4i9A',
+    orientation: 'landscape',
+  },
+]
 
 const extractVideoId = (value: string): string | null => {
   const trimmed = value.trim()
@@ -75,22 +103,41 @@ const formatTimecode = (seconds: number): string => {
   return `${minutes}:${paddedSeconds}.${paddedMilliseconds}`
 }
 
+const detectOrientationFromInput = (input: string): VideoOrientation => {
+  const lowered = input.toLowerCase()
+  if (lowered.includes('/shorts/')) {
+    return 'portrait'
+  }
+
+  return 'landscape'
+}
+
 function App() {
-  const [videoInput, setVideoInput] = useState(DEFAULT_VIDEO_URL)
-  const [videoId, setVideoId] = useState(DEFAULT_VIDEO_ID)
-  const [videoError, setVideoError] = useState<string | null>(null)
+  const [videos, setVideos] = useState<VideoItem[]>(() =>
+    DEFAULT_FEED.map((video, index) => ({
+      ...video,
+      orientation: detectOrientationFromInput(video.source),
+      id: `default-${index + 1}`,
+    })),
+  )
   const [rows, setRows] = useState(4)
   const [columns, setColumns] = useState(6)
   const [isGridVisible, setIsGridVisible] = useState(true)
-  const [points, setPoints] = useState<PointOfInterest[]>([])
-  const [copyFeedback, setCopyFeedback] = useState<string>('')
-  const [isPlayerReady, setIsPlayerReady] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [orientation, setOrientation] = useState<VideoOrientation>('landscape')
+  const [videoInput, setVideoInput] = useState('')
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const [pointsByVideo, setPointsByVideo] = useState<Record<string, PointOfInterest[]>>({})
+  const [timeState, setTimeState] = useState<
+    Record<string, { currentTime: number; duration: number }>
+  >({})
+  const [readyMap, setReadyMap] = useState<Record<string, boolean>>({})
+  const [copyFeedback, setCopyFeedback] = useState('')
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [activeVideoId, setActiveVideoId] = useState(() =>
+    DEFAULT_FEED.at(0)?.videoId ?? '',
+  )
 
-  const playerRef = useRef<YouTubePlayer | null>(null)
-  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const playersRef = useRef<Record<string, YouTubePlayer | null>>({})
+  const overlayRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const idCounter = useRef(0)
 
   const youTubeOptions = useMemo(
@@ -106,32 +153,93 @@ function App() {
     [],
   )
 
-  const gridTemplateStyle = useMemo(
-    () => ({
-      gridTemplateRows: `repeat(${rows}, 1fr)`,
-      gridTemplateColumns: `repeat(${columns}, 1fr)`,
-    }),
-    [rows, columns],
-  )
-
-  const handlePlayerReady = (event: YouTubeEvent) => {
-    playerRef.current = event.target
-    setIsPlayerReady(true)
-  }
-
-  const detectOrientationFromInput = useCallback(
-    (input: string): VideoOrientation => {
-      const lowered = input.toLowerCase()
-      if (lowered.includes('/shorts/')) {
-        return 'portrait'
-      }
-
-      return 'landscape'
+  const handlePlayerReady = useCallback(
+    (videoId: string) => (event: YouTubeEvent) => {
+      playersRef.current[videoId] = event.target
+      setReadyMap((previous) => ({ ...previous, [videoId]: true }))
     },
     [],
   )
 
-  const handleVideoSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    let frameId: number
+
+    const updateTimes = () => {
+      setTimeState((previous) => {
+        let changed = false
+        const next: Record<string, { currentTime: number; duration: number }> = {}
+
+        videos.forEach((video) => {
+          const player = playersRef.current[video.videoId]
+          const existing = previous[video.videoId] ?? { currentTime: 0, duration: 0 }
+
+          if (player) {
+            const newTime = player.getCurrentTime?.() ?? 0
+            const newDuration = player.getDuration?.() ?? 0
+
+            if (
+              Math.abs(existing.currentTime - newTime) > 0.02 ||
+              Math.abs(existing.duration - newDuration) > 0.1
+            ) {
+              next[video.videoId] = {
+                currentTime: newTime,
+                duration: newDuration,
+              }
+              changed = true
+            } else {
+              next[video.videoId] = existing
+            }
+          } else {
+            next[video.videoId] = existing
+          }
+        })
+
+        if (!changed) {
+          const previousKeys = Object.keys(previous)
+          if (previousKeys.length !== videos.length) {
+            changed = true
+          } else {
+            for (const key of previousKeys) {
+              if (!next[key]) {
+                changed = true
+                break
+              }
+            }
+          }
+        }
+
+        return changed ? next : previous
+      })
+
+      frameId = requestAnimationFrame(updateTimes)
+    }
+
+    frameId = requestAnimationFrame(updateTimes)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+    }
+  }, [videos])
+
+  useEffect(() => {
+    setCopyFeedback('')
+  }, [activeVideoId])
+
+  useEffect(() => {
+    if (activeVideoId && !videos.some((video) => video.videoId === activeVideoId)) {
+      setActiveVideoId(videos.at(0)?.videoId ?? '')
+    }
+  }, [videos, activeVideoId])
+
+  const handleDrawerClose = () => {
+    setIsDrawerOpen(false)
+  }
+
+  const handleDrawerOpen = () => {
+    setIsDrawerOpen(true)
+  }
+
+  const handleAddVideo = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const id = extractVideoId(videoInput)
     if (!id) {
@@ -139,17 +247,56 @@ function App() {
       return
     }
 
-    setVideoId(id)
+    if (videos.some((video) => video.videoId === id)) {
+      setVideoError('That video is already in the feed.')
+      return
+    }
+
+    const orientation = detectOrientationFromInput(videoInput)
+    setVideos((previous) => [
+      ...previous,
+      {
+        id: `video-${Date.now()}`,
+        videoId: id,
+        source: videoInput.trim(),
+        orientation,
+      },
+    ])
+    setVideoInput('')
     setVideoError(null)
-    setIsPlayerReady(false)
-    setPoints([])
-    setOrientation(detectOrientationFromInput(videoInput))
+    setActiveVideoId(id)
+  }
+
+  const handleRemoveVideo = (videoId: string) => {
+    setVideos((previous) => previous.filter((video) => video.videoId !== videoId))
+    setPointsByVideo((previous) => {
+      const { [videoId]: _removed, ...rest } = previous
+      return rest
+    })
+    setTimeState((previous) => {
+      const { [videoId]: _removed, ...rest } = previous
+      return rest
+    })
+    setReadyMap((previous) => {
+      const { [videoId]: _removed, ...rest } = previous
+      return rest
+    })
+    delete playersRef.current[videoId]
+    delete overlayRefs.current[videoId]
+
+    setActiveVideoId((current) => {
+      if (current === videoId) {
+        const next = videos.filter((video) => video.videoId !== videoId)
+        return next.at(0)?.videoId ?? ''
+      }
+      return current
+    })
   }
 
   const handleDimensionChange = (
     setter: React.Dispatch<React.SetStateAction<number>>,
   ) =>
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    (event: ChangeEvent<HTMLInputElement>) => {
       const value = Number.parseInt(event.target.value, 10)
       if (Number.isNaN(value)) {
         return
@@ -159,15 +306,20 @@ function App() {
       setter(clamped)
     }
 
+  const toggleGridVisibility = () => {
+    setIsGridVisible((value) => !value)
+  }
+
   const recordPoint = useCallback(
-    (rowIndex: number, columnIndex: number) =>
-      (event: React.MouseEvent<HTMLButtonElement>) => {
-        if (!playerRef.current || !isPlayerReady) {
+    (videoId: string, rowIndex: number, columnIndex: number) =>
+      (event: MouseEvent<HTMLButtonElement>) => {
+        const player = playersRef.current[videoId]
+        if (!player || !readyMap[videoId]) {
           return
         }
 
-        const currentTime = playerRef.current.getCurrentTime?.() ?? 0
-        const overlayRect = overlayRef.current?.getBoundingClientRect()
+        const currentTime = player.getCurrentTime?.() ?? 0
+        const overlayRect = overlayRefs.current[videoId]?.getBoundingClientRect()
         const clickX = event.clientX
         const clickY = event.clientY
 
@@ -190,25 +342,44 @@ function App() {
           note: '',
         }
 
-        setPoints((previous) =>
-          [...previous, newPoint].sort((a, b) => a.time - b.time),
-        )
+        setPointsByVideo((previous) => {
+          const nextPoints = [
+            ...(previous[videoId] ?? []),
+            newPoint,
+          ].sort((a, b) => a.time - b.time)
+
+          return {
+            ...previous,
+            [videoId]: nextPoints,
+          }
+        })
         setCopyFeedback('')
+        setActiveVideoId(videoId)
       },
-    [columns, rows, isPlayerReady],
+    [columns, rows, readyMap],
   )
 
-  const removePoint = (id: number) => {
-    setPoints((previous) => previous.filter((point) => point.id !== id))
+  const removePoint = (videoId: string, id: number) => {
+    setPointsByVideo((previous) => {
+      const next = (previous[videoId] ?? []).filter((point) => point.id !== id)
+      return {
+        ...previous,
+        [videoId]: next,
+      }
+    })
     setCopyFeedback('')
   }
 
-  const clearPoints = () => {
-    setPoints([])
+  const clearPoints = (videoId: string) => {
+    setPointsByVideo((previous) => ({
+      ...previous,
+      [videoId]: [],
+    }))
     setCopyFeedback('')
   }
 
-  const handleCopy = async () => {
+  const handleCopy = async (videoId: string) => {
+    const points = pointsByVideo[videoId] ?? []
     if (!points.length) {
       return
     }
@@ -227,351 +398,402 @@ function App() {
     }
   }
 
-  const toggleGridVisibility = () => {
-    setIsGridVisible((value) => !value)
-  }
-
-  const gridCells = useMemo(() => {
-    return Array.from({ length: rows * columns }, (_, index) => {
-      const rowIndex = Math.floor(index / columns)
-      const columnIndex = index % columns
-      return (
-        <button
-          key={`${rowIndex}-${columnIndex}`}
-          type="button"
-          className="grid-cell"
-          onClick={recordPoint(rowIndex, columnIndex)}
-          aria-label={`Mark row ${rowIndex + 1}, column ${columnIndex + 1}`}
-        />
-      )
-    })
-  }, [rows, columns, recordPoint])
-
-  const activePoints = useMemo(() => {
-    const DISPLAY_WINDOW = 1.5
-    return points.filter(
-      (point) => Math.abs(point.time - currentTime) <= DISPLAY_WINDOW / 2,
-    )
-  }, [points, currentTime])
-
-  const timelineMarkers = useMemo(() => {
-    if (!duration) {
-      return [] as Array<{ id: number; left: number; isActive: boolean }>
-    }
-
-    return points.map((point) => ({
-      id: point.id,
-      left: (point.time / duration) * 100,
-      isActive: activePoints.some((active) => active.id === point.id),
-    }))
-  }, [points, duration, activePoints])
-
-  useEffect(() => {
-    if (!isPlayerReady || !playerRef.current) {
-      return undefined
-    }
-
-    let frameId: number
-
-    const updateTime = () => {
-      const player = playerRef.current
-      if (player) {
-        const newTime = player.getCurrentTime?.() ?? 0
-        const newDuration = player.getDuration?.() ?? 0
-
-        setCurrentTime((previous) =>
-          Math.abs(previous - newTime) > 0.02 ? newTime : previous,
-        )
-        setDuration((previous) =>
-          Math.abs(previous - newDuration) > 0.1 ? newDuration : previous,
-        )
-      }
-
-      frameId = requestAnimationFrame(updateTime)
-    }
-
-    frameId = requestAnimationFrame(updateTime)
-
-    return () => {
-      cancelAnimationFrame(frameId)
-    }
-  }, [isPlayerReady])
-
-  const progressPercent = useMemo(() => {
-    if (!duration) {
-      return 0
-    }
-
-    return Math.min(100, Math.max(0, (currentTime / duration) * 100))
-  }, [currentTime, duration])
-
-  const updateNote = (id: number, note: string) => {
-    setPoints((previous) =>
-      previous.map((point) =>
-        point.id === id
+  const updateNote = (videoId: string, pointId: number, note: string) => {
+    setPointsByVideo((previous) => {
+      const updated = (previous[videoId] ?? []).map((point) =>
+        point.id === pointId
           ? {
               ...point,
               note,
             }
           : point,
-      ),
-    )
+      )
+
+      return {
+        ...previous,
+        [videoId]: updated,
+      }
+    })
     setCopyFeedback('')
   }
+
+  const activeVideo = videos.find((video) => video.videoId === activeVideoId) ?? null
+  const activePoints = activeVideo ? pointsByVideo[activeVideo.videoId] ?? [] : []
 
   return (
     <div className="app">
       <header className="app__header">
-        <h1>Video Grid Annotator</h1>
-        <p className="app__subtitle">
-          Overlay a capture grid on top of any YouTube video and record points of
-          interest with exact timestamps.
-        </p>
+        <div className="app__heading">
+          <h1>Vertical Video Grid Feed</h1>
+          <p className="app__subtitle">
+            Scroll through a TikTok-style feed while capturing spatial notes on each video.
+          </p>
+        </div>
+        <button type="button" className="button primary" onClick={handleDrawerOpen}>
+          Open controls
+        </button>
       </header>
 
-      <section className="panel">
-        <h2 className="panel__title">Video source</h2>
-        <form className="video-form" onSubmit={handleVideoSubmit}>
-          <label className="field">
-            <span className="field__label">YouTube URL or video ID</span>
-            <input
-              value={videoInput}
-              onChange={(event) => setVideoInput(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              className={videoError ? 'field__input field__input--error' : 'field__input'}
-              aria-invalid={videoError ? 'true' : 'false'}
-            />
-          </label>
-          {videoError ? (
-            <p className="field__error" role="alert">
-              {videoError}
-            </p>
-          ) : null}
-          <div className="video-form__actions">
-            <button type="submit" className="button primary">
-              Load video
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={() => {
-                setVideoInput(DEFAULT_VIDEO_URL)
-                setVideoId(DEFAULT_VIDEO_ID)
-                setVideoError(null)
-                setPoints([])
-                setOrientation('landscape')
-              }}
-            >
-              Reset
-            </button>
-          </div>
-        </form>
-      </section>
+      <main className="feed" role="list">
+        {videos.length ? (
+          videos.map((video) => {
+            const videoPoints = pointsByVideo[video.videoId] ?? []
+            const timeInfo = timeState[video.videoId] ?? { currentTime: 0, duration: 0 }
+            const displayedPoints = videoPoints.filter(
+              (point) => Math.abs(point.time - timeInfo.currentTime) <= 0.75,
+            )
+            const timelineMarkers = timeInfo.duration
+              ? videoPoints.map((point) => ({
+                  id: point.id,
+                  left: (point.time / timeInfo.duration) * 100,
+                  isActive: displayedPoints.some((active) => active.id === point.id),
+                }))
+              : []
+            const progressPercent = timeInfo.duration
+              ? Math.min(100, Math.max(0, (timeInfo.currentTime / timeInfo.duration) * 100))
+              : 0
 
-      <section className="panel">
-        <h2 className="panel__title">Grid settings</h2>
-        <div className="grid-settings">
-          <label className="field compact">
-            <span className="field__label">Rows</span>
-            <input
-              type="number"
-              min={MIN_GRID_SIZE}
-              max={MAX_GRID_SIZE}
-              value={rows}
-              onChange={handleDimensionChange(setRows)}
-              className="field__input"
-            />
-          </label>
-          <label className="field compact">
-            <span className="field__label">Columns</span>
-            <input
-              type="number"
-              min={MIN_GRID_SIZE}
-              max={MAX_GRID_SIZE}
-              value={columns}
-              onChange={handleDimensionChange(setColumns)}
-              className="field__input"
-            />
-          </label>
-          <label className="field field--orientation">
-            <span className="field__label">Video orientation</span>
-            <select
-              className="field__input"
-              value={orientation}
-              onChange={(event) =>
-                setOrientation(event.target.value as VideoOrientation)
-              }
-            >
-              <option value="landscape">Landscape (16:9)</option>
-              <option value="portrait">Vertical (9:16)</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="button"
-            onClick={toggleGridVisibility}
-          >
-            {isGridVisible ? 'Hide grid' : 'Show grid'}
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2 className="panel__title">Annotate</h2>
-        <div className={`player-shell player-shell--${orientation}`}>
-          <div className="player-frame" style={{ paddingTop: ORIENTATION_PADDING[orientation] }}>
-            <YouTube
-              videoId={videoId}
-              opts={youTubeOptions}
-              onReady={handlePlayerReady}
-              className="player-frame__video"
-              iframeClassName="player-frame__video"
-            />
-          </div>
-          <div
-            ref={overlayRef}
-            className={`grid-overlay${isGridVisible ? ' is-visible' : ''}`}
-            style={gridTemplateStyle}
-            data-ready={isPlayerReady}
-          >
-            {isGridVisible ? gridCells : null}
-            {activePoints.map((point) => (
-              <div
-                key={`marker-${point.id}`}
-                className="poi-marker"
-                style={{
-                  left: `${point.xPercent}%`,
-                  top: `${point.yPercent}%`,
-                }}
-                aria-hidden="true"
-              />
-            ))}
-            {activePoints
-              .filter((point) => point.note.trim().length > 0)
-              .map((point) => (
+            return (
+              <section
+                key={video.id}
+                className={`feed-card${
+                  activeVideoId === video.videoId ? ' feed-card--active' : ''
+                }`}
+                role="listitem"
+                aria-label={`Video ${video.videoId}`}
+              >
                 <div
-                  key={`callout-${point.id}`}
-                  className="poi-callout"
-                  style={{
-                    left: `${point.xPercent}%`,
-                    top: `${point.yPercent}%`,
-                  }}
-                  role="status"
+                  className="feed-card__inner"
+                  onClick={() => setActiveVideoId(video.videoId)}
+                  role="presentation"
                 >
-                  <span className="poi-callout__time">
-                    {formatTimecode(point.time)}
-                  </span>
-                  <span className="poi-callout__note">{point.note}</span>
-                </div>
-              ))}
-          </div>
-        </div>
-        {duration > 0 ? (
-          <div className="timeline" aria-hidden="true">
-            <div className="timeline__track">
-              <div
-                className="timeline__progress"
-                style={{ width: `${progressPercent}%` }}
-              />
-              {timelineMarkers.map((marker) => (
-                <div
-                  key={`marker-${marker.id}`}
-                  className={
-                    marker.isActive
-                      ? 'timeline__marker timeline__marker--active'
-                      : 'timeline__marker'
-                  }
-                  style={{ left: `${marker.left}%` }}
-                />
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {!isPlayerReady ? (
-          <p className="helper helper--muted">
-            Loading player… Click the grid once the video is ready.
-          </p>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <div className="panel__header">
-          <h2 className="panel__title">Captured points</h2>
-          <div className="panel__actions">
-            <button
-              type="button"
-              className="button"
-              onClick={handleCopy}
-              disabled={!points.length}
-            >
-              Copy JSON
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={clearPoints}
-              disabled={!points.length}
-            >
-              Clear list
-            </button>
-          </div>
-        </div>
-        {copyFeedback ? (
-          <p className="helper" role="status">
-            {copyFeedback}
-          </p>
-        ) : null}
-        {points.length ? (
-          <div className="points-table__wrapper">
-            <table className="points-table">
-              <thead>
-                <tr>
-                  <th scope="col">Time</th>
-                  <th scope="col">Row</th>
-                  <th scope="col">Column</th>
-                  <th scope="col">X (%)</th>
-                  <th scope="col">Y (%)</th>
-                  <th scope="col">Note</th>
-                  <th scope="col" className="points-table__actions" aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {points.map((point) => (
-                  <tr key={point.id}>
-                    <td>{formatTimecode(point.time)}</td>
-                    <td>{point.row}</td>
-                    <td>{point.column}</td>
-                    <td>{point.xPercent.toFixed(1)}</td>
-                    <td>{point.yPercent.toFixed(1)}</td>
-                    <td className="points-table__note">
-                      <input
-                        type="text"
-                        className="field__input field__input--inline"
-                        value={point.note}
-                        onChange={(event) => updateNote(point.id, event.target.value)}
-                        placeholder="Add a note"
+                  <div className={`player-shell player-shell--${video.orientation}`}>
+                    <div
+                      className="player-frame"
+                      style={{ paddingTop: ORIENTATION_PADDING[video.orientation] }}
+                    >
+                      <YouTube
+                        videoId={video.videoId}
+                        opts={youTubeOptions}
+                        onReady={handlePlayerReady(video.videoId)}
+                        className="player-frame__video"
+                        iframeClassName="player-frame__video"
                       />
-                    </td>
-                    <td className="points-table__actions">
+                    </div>
+                    <div
+                      ref={(node) => {
+                        overlayRefs.current[video.videoId] = node
+                      }}
+                      className={`grid-overlay${isGridVisible ? ' is-visible' : ''}`}
+                      style={{
+                        gridTemplateRows: `repeat(${rows}, 1fr)`,
+                        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+                      }}
+                      data-ready={readyMap[video.videoId] ? 'true' : 'false'}
+                    >
+                      {isGridVisible
+                        ? Array.from({ length: rows * columns }, (_, index) => {
+                            const rowIndex = Math.floor(index / columns)
+                            const columnIndex = index % columns
+                            return (
+                              <button
+                                key={`${video.videoId}-${rowIndex}-${columnIndex}`}
+                                type="button"
+                                className="grid-cell"
+                                onClick={recordPoint(video.videoId, rowIndex, columnIndex)}
+                                aria-label={`Mark row ${rowIndex + 1}, column ${
+                                  columnIndex + 1
+                                }`}
+                              />
+                            )
+                          })
+                        : null}
+                      {displayedPoints.map((point) => (
+                        <div
+                          key={`marker-${point.id}`}
+                          className="poi-marker"
+                          style={{
+                            left: `${point.xPercent}%`,
+                            top: `${point.yPercent}%`,
+                          }}
+                          role="status"
+                        >
+                          <div className="poi-callout">
+                            <span className="poi-callout__time">
+                              {formatTimecode(point.time)}
+                            </span>
+                            <span className="poi-callout__note">{point.note}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {timeInfo.duration ? (
+                    <div className="timeline" aria-hidden="true">
+                      <div className="timeline__track">
+                        <div
+                          className="timeline__progress"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                        {timelineMarkers.map((marker) => (
+                          <div
+                            key={`marker-${marker.id}`}
+                            className={
+                              marker.isActive
+                                ? 'timeline__marker timeline__marker--active'
+                                : 'timeline__marker'
+                            }
+                            style={{ left: `${marker.left}%` }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {!readyMap[video.videoId] ? (
+                    <p className="helper helper--muted">
+                      Loading player… Tap once the grid appears.
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            )
+          })
+        ) : (
+          <div className="feed__empty">
+            <p>No videos yet. Open the controls to add your first clip.</p>
+          </div>
+        )}
+      </main>
+
+      <div className={`drawer${isDrawerOpen ? ' drawer--open' : ''}`} aria-hidden={!isDrawerOpen}>
+        <div className="drawer__scrim" onClick={handleDrawerClose} role="presentation" />
+        <aside className="drawer__panel" role="dialog" aria-modal="true" aria-label="Controls">
+          <header className="drawer__header">
+            <div>
+              <h2>Feed controls</h2>
+              <p className="drawer__subtitle">
+                Manage videos, adjust the capture grid, and review your annotations.
+              </p>
+            </div>
+            <button type="button" className="button" onClick={handleDrawerClose}>
+              Close
+            </button>
+          </header>
+
+          <div className="drawer__content">
+            <section className="panel-section">
+              <h3 className="panel__title">Add a video</h3>
+              <form className="video-form" onSubmit={handleAddVideo}>
+                <label className="field">
+                  <span className="field__label">YouTube URL or video ID</span>
+                  <input
+                    value={videoInput}
+                    onChange={(event) => setVideoInput(event.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className={videoError ? 'field__input field__input--error' : 'field__input'}
+                    aria-invalid={videoError ? 'true' : 'false'}
+                  />
+                </label>
+                {videoError ? (
+                  <p className="field__error" role="alert">
+                    {videoError}
+                  </p>
+                ) : null}
+                <div className="video-form__actions">
+                  <button type="submit" className="button primary">
+                    Add to feed
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      setVideoInput('')
+                      setVideoError(null)
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="panel-section">
+              <h3 className="panel__title">Feed videos</h3>
+              {videos.length ? (
+                <ul className="video-list">
+                  {videos.map((video) => (
+                    <li key={`drawer-${video.id}`} className="video-list__item">
                       <button
                         type="button"
-                        className="button button--danger"
-                        onClick={() => removePoint(point.id)}
+                        className={
+                          activeVideoId === video.videoId
+                            ? 'video-list__select video-list__select--active'
+                            : 'video-list__select'
+                        }
+                        onClick={() => setActiveVideoId(video.videoId)}
+                      >
+                        {video.videoId}
+                      </button>
+                      <button
+                        type="button"
+                        className="video-list__remove"
+                        onClick={() => handleRemoveVideo(video.videoId)}
+                        aria-label={`Remove video ${video.videoId}`}
                       >
                         Remove
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="helper helper--muted">
+                  Your feed is empty. Add a video to get started.
+                </p>
+              )}
+            </section>
+
+            <section className="panel-section">
+              <h3 className="panel__title">Grid settings</h3>
+              <div className="grid-settings">
+                <label className="field compact">
+                  <span className="field__label">Rows</span>
+                  <input
+                    type="number"
+                    min={MIN_GRID_SIZE}
+                    max={MAX_GRID_SIZE}
+                    value={rows}
+                    onChange={handleDimensionChange(setRows)}
+                    className="field__input"
+                  />
+                </label>
+                <label className="field compact">
+                  <span className="field__label">Columns</span>
+                  <input
+                    type="number"
+                    min={MIN_GRID_SIZE}
+                    max={MAX_GRID_SIZE}
+                    value={columns}
+                    onChange={handleDimensionChange(setColumns)}
+                    className="field__input"
+                  />
+                </label>
+                <button type="button" className="button" onClick={toggleGridVisibility}>
+                  {isGridVisible ? 'Hide grid' : 'Show grid'}
+                </button>
+              </div>
+              {activeVideo ? (
+                <label className="field field--orientation">
+                  <span className="field__label">Orientation for active video</span>
+                  <select
+                    className="field__input"
+                    value={activeVideo.orientation}
+                    onChange={(event) => {
+                      const newOrientation = event.target.value as VideoOrientation
+                      setVideos((previous) =>
+                        previous.map((video) =>
+                          video.videoId === activeVideo.videoId
+                            ? {
+                                ...video,
+                                orientation: newOrientation,
+                              }
+                            : video,
+                        ),
+                      )
+                    }}
+                  >
+                    <option value="landscape">Landscape (16:9)</option>
+                    <option value="portrait">Vertical (9:16)</option>
+                  </select>
+                </label>
+              ) : null}
+            </section>
+
+            <section className="panel-section">
+              <div className="panel__header">
+                <h3 className="panel__title">Captured points</h3>
+                <div className="panel__actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => activeVideo && handleCopy(activeVideo.videoId)}
+                    disabled={!activeVideo || !activePoints.length}
+                  >
+                    Copy JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => activeVideo && clearPoints(activeVideo.videoId)}
+                    disabled={!activeVideo || !activePoints.length}
+                  >
+                    Clear list
+                  </button>
+                </div>
+              </div>
+              {copyFeedback ? (
+                <p className="helper" role="status">
+                  {copyFeedback}
+                </p>
+              ) : null}
+              {activePoints.length ? (
+                <div className="points-table__wrapper">
+                  <table className="points-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Time</th>
+                        <th scope="col">Row</th>
+                        <th scope="col">Column</th>
+                        <th scope="col">X (%)</th>
+                        <th scope="col">Y (%)</th>
+                        <th scope="col">Note</th>
+                        <th scope="col" className="points-table__actions" aria-label="Actions" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activePoints.map((point) => (
+                        <tr key={point.id}>
+                          <td>{formatTimecode(point.time)}</td>
+                          <td>{point.row}</td>
+                          <td>{point.column}</td>
+                          <td>{point.xPercent.toFixed(1)}</td>
+                          <td>{point.yPercent.toFixed(1)}</td>
+                          <td className="points-table__note">
+                            <input
+                              type="text"
+                              className="field__input field__input--inline"
+                              value={point.note}
+                              onChange={(event) =>
+                                activeVideo &&
+                                updateNote(activeVideo.videoId, point.id, event.target.value)
+                              }
+                              placeholder="Add a note"
+                            />
+                          </td>
+                          <td className="points-table__actions">
+                            <button
+                              type="button"
+                              className="button button--danger"
+                              onClick={() =>
+                                activeVideo && removePoint(activeVideo.videoId, point.id)
+                              }
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="helper helper--muted">
+                  Select a video and tap the grid to capture new points.
+                </p>
+              )}
+            </section>
           </div>
-        ) : (
-          <p className="helper helper--muted">
-            Click anywhere on the grid to capture a point of interest.
-          </p>
-        )}
-      </section>
+        </aside>
+      </div>
     </div>
   )
 }
