@@ -13,10 +13,16 @@ type PointOfInterest = {
   note: string
 }
 
+type VideoOrientation = 'landscape' | 'portrait'
+
 const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'
 const DEFAULT_VIDEO_URL = `https://www.youtube.com/watch?v=${DEFAULT_VIDEO_ID}`
 const MIN_GRID_SIZE = 1
 const MAX_GRID_SIZE = 12
+const ORIENTATION_PADDING: Record<VideoOrientation, string> = {
+  landscape: '56.25%',
+  portrait: '177.78%',
+}
 
 const extractVideoId = (value: string): string | null => {
   const trimmed = value.trim()
@@ -81,6 +87,7 @@ function App() {
   const [isPlayerReady, setIsPlayerReady] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [orientation, setOrientation] = useState<VideoOrientation>('landscape')
 
   const playerRef = useRef<YouTubePlayer | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -112,6 +119,18 @@ function App() {
     setIsPlayerReady(true)
   }
 
+  const detectOrientationFromInput = useCallback(
+    (input: string): VideoOrientation => {
+      const lowered = input.toLowerCase()
+      if (lowered.includes('/shorts/')) {
+        return 'portrait'
+      }
+
+      return 'landscape'
+    },
+    [],
+  )
+
   const handleVideoSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const id = extractVideoId(videoInput)
@@ -124,6 +143,7 @@ function App() {
     setVideoError(null)
     setIsPlayerReady(false)
     setPoints([])
+    setOrientation(detectOrientationFromInput(videoInput))
   }
 
   const handleDimensionChange = (
@@ -339,6 +359,7 @@ function App() {
                 setVideoId(DEFAULT_VIDEO_ID)
                 setVideoError(null)
                 setPoints([])
+                setOrientation('landscape')
               }}
             >
               Reset
@@ -372,6 +393,19 @@ function App() {
               className="field__input"
             />
           </label>
+          <label className="field field--orientation">
+            <span className="field__label">Video orientation</span>
+            <select
+              className="field__input"
+              value={orientation}
+              onChange={(event) =>
+                setOrientation(event.target.value as VideoOrientation)
+              }
+            >
+              <option value="landscape">Landscape (16:9)</option>
+              <option value="portrait">Vertical (9:16)</option>
+            </select>
+          </label>
           <button
             type="button"
             className="button"
@@ -384,8 +418,8 @@ function App() {
 
       <section className="panel">
         <h2 className="panel__title">Annotate</h2>
-        <div className="player-shell">
-          <div className="player-frame">
+        <div className={`player-shell player-shell--${orientation}`}>
+          <div className="player-frame" style={{ paddingTop: ORIENTATION_PADDING[orientation] }}>
             <YouTube
               videoId={videoId}
               opts={youTubeOptions}

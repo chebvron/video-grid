@@ -80,6 +80,21 @@
   max-width: 120px;
 }
 
+.field--orientation {
+  min-width: 200px;
+}
+
+.field--orientation .field__input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #6366f1 50%),
+    linear-gradient(135deg, #6366f1 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 13px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 2.25rem;
+}
+
 .field__label {
   font-size: 0.95rem;
   font-weight: 600;
@@ -174,10 +189,13 @@
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.2);
 }
 
+.player-shell--portrait {
+  max-width: 540px;
+}
+
 .player-frame {
   position: relative;
   width: 100%;
-  padding-top: 56.25%;
 }
 
 .player-frame__video {
