@@ -63,7 +63,7 @@ const extractVideoId = (value: string): string | null => {
         return potentialId
       }
     }
-  } catch (error) {
+  } catch {
     // Ignore invalid URL parsing errors.
   }
 
@@ -105,10 +105,15 @@ function App() {
   const [activeVideoKey, setActiveVideoKey] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<Record<string, string>>({})
   const [playbackStates, setPlaybackStates] = useState<Record<string, PlaybackState>>({})
+  const [activeEditingPoint, setActiveEditingPoint] = useState<{
+    videoKey: string
+    pointId: string
+  } | null>(null)
 
   const containerRefs = useRef(new Map<string, HTMLDivElement | null>())
   const overlayRefs = useRef(new Map<string, HTMLDivElement | null>())
   const playerRefs = useRef(new Map<string, YouTubePlayer>())
+  const noteInputRefs = useRef(new Map<string, Map<string, HTMLInputElement | null>>())
 
   const baseYouTubeOptions = useMemo(
     () => ({
@@ -328,9 +333,11 @@ function App() {
   const handleRemoveVideo = useCallback((key: string) => {
     setVideos((previous) => previous.filter((video) => video.key !== key))
     setCopyFeedback((previous) => {
-      const { [key]: _removed, ...rest } = previous
+      const rest = { ...previous }
+      delete rest[key]
       return rest
     })
+    setActiveEditingPoint((previous) => (previous?.videoKey === key ? null : previous))
   }, [])
 
   const handleDimensionChange = useCallback(
@@ -366,10 +373,13 @@ function App() {
           return
         }
 
-        const payload = video.points.map(({ id, ...rest }) => rest)
+        const payload = video.points.map(({ id, ...rest }) => {
+          void id
+          return rest
+        })
         await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
         updateCopyFeedback(video.key, 'Copied to clipboard!')
-      } catch (error) {
+      } catch {
         updateCopyFeedback(video.key, 'Unable to access the clipboard in this environment.')
       }
     },
@@ -388,6 +398,7 @@ function App() {
       ),
     )
     updateCopyFeedback(key, '')
+    setActiveEditingPoint((previous) => (previous?.videoKey === key ? null : previous))
   }, [updateCopyFeedback])
 
   const updatePointNote = useCallback(
@@ -427,6 +438,11 @@ function App() {
         ),
       )
       updateCopyFeedback(videoKey, '')
+      setActiveEditingPoint((previous) =>
+        previous && previous.videoKey === videoKey && previous.pointId === pointId
+          ? null
+          : previous,
+      )
     },
     [updateCopyFeedback],
   )
@@ -465,6 +481,7 @@ function App() {
           note: '',
         }
 
+        player.pauseVideo?.()
         setVideos((previous) =>
           previous.map((video) =>
             video.key === videoKey
@@ -476,9 +493,63 @@ function App() {
           ),
         )
         updateCopyFeedback(videoKey, '')
+        setActiveEditingPoint({ videoKey, pointId: id })
       },
     [columns, rows, updateCopyFeedback],
   )
+
+  const handleNoteBlur = useCallback(
+    (videoKey: string, pointId: string) => {
+      if (
+        activeEditingPoint &&
+        activeEditingPoint.videoKey === videoKey &&
+        activeEditingPoint.pointId === pointId
+      ) {
+        setActiveEditingPoint(null)
+        if (activeVideoKey === videoKey) {
+          const player = playerRefs.current.get(videoKey)
+          player?.playVideo?.()
+        }
+      }
+    },
+    [activeEditingPoint, activeVideoKey],
+  )
+
+  const registerNoteInputRef = useCallback(
+    (videoKey: string, pointId: string) =>
+      (node: HTMLInputElement | null) => {
+        let videoMap = noteInputRefs.current.get(videoKey)
+        if (!videoMap) {
+          videoMap = new Map<string, HTMLInputElement | null>()
+          noteInputRefs.current.set(videoKey, videoMap)
+        }
+
+        if (node) {
+          videoMap.set(pointId, node)
+        } else {
+          videoMap.delete(pointId)
+          if (!videoMap.size) {
+            noteInputRefs.current.delete(videoKey)
+          }
+        }
+      },
+    [],
+  )
+
+  useEffect(() => {
+    if (!activeEditingPoint) {
+      return
+    }
+
+    const input = noteInputRefs.current
+      .get(activeEditingPoint.videoKey)
+      ?.get(activeEditingPoint.pointId)
+
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [activeEditingPoint, videos])
 
   const gridCellsForVideo = useCallback(
     (videoKey: string) =>
@@ -616,9 +687,11 @@ function App() {
                           className="field__input field__input--inline"
                           value={point.note}
                           placeholder="Add a note"
+                          ref={registerNoteInputRef(video.key, point.id)}
                           onChange={(event) =>
                             updatePointNote(video.key, point.id, event.target.value)
                           }
+                          onBlur={() => handleNoteBlur(video.key, point.id)}
                         />
                         <button
                           type="button"
