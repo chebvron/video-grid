@@ -103,7 +103,10 @@ function App() {
   const [videoInput, setVideoInput] = useState('')
   const [videoError, setVideoError] = useState<string | null>(null)
   const [activeVideoKey, setActiveVideoKey] = useState<string | null>(null)
-  const [copyFeedback, setCopyFeedback] = useState<Record<string, string>>({})
+  const [editingPoint, setEditingPoint] = useState<{
+    videoKey: string
+    pointId: string
+  } | null>(null)
   const [playbackStates, setPlaybackStates] = useState<Record<string, PlaybackState>>({})
 
   const containerRefs = useRef(new Map<string, HTMLDivElement | null>())
@@ -325,13 +328,18 @@ function App() {
     [videoInput],
   )
 
-  const handleRemoveVideo = useCallback((key: string) => {
-    setVideos((previous) => previous.filter((video) => video.key !== key))
-    setCopyFeedback((previous) => {
-      const { [key]: _removed, ...rest } = previous
-      return rest
-    })
-  }, [])
+  const handleRemoveVideo = useCallback(
+    (key: string) => {
+      setVideos((previous) => previous.filter((video) => video.key !== key))
+      setEditingPoint((previous) => {
+        if (previous && previous.videoKey === key) {
+          return null
+        }
+        return previous
+      })
+    },
+    [],
+  )
 
   const handleDimensionChange = useCallback(
     (setter: React.Dispatch<React.SetStateAction<number>>) =>
@@ -347,53 +355,14 @@ function App() {
     [],
   )
 
-  const updateCopyFeedback = useCallback((key: string, message: string) => {
-    setCopyFeedback((previous) => ({
-      ...previous,
-      [key]: message,
-    }))
+  const logVideoPoints = useCallback((videoKey: string, points: PointOfInterest[]) => {
+    console.log(`Annotations for ${videoKey}`, points)
   }, [])
-
-  const handleCopyPoints = useCallback(
-    async (video: VideoTrack) => {
-      if (!video.points.length) {
-        return
-      }
-
-      try {
-        if (!navigator.clipboard) {
-          updateCopyFeedback(video.key, 'Clipboard access is not available.')
-          return
-        }
-
-        const payload = video.points.map(({ id, ...rest }) => rest)
-        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
-        updateCopyFeedback(video.key, 'Copied to clipboard!')
-      } catch (error) {
-        updateCopyFeedback(video.key, 'Unable to access the clipboard in this environment.')
-      }
-    },
-    [updateCopyFeedback],
-  )
-
-  const clearVideoPoints = useCallback((key: string) => {
-    setVideos((previous) =>
-      previous.map((video) =>
-        video.key === key
-          ? {
-              ...video,
-              points: [],
-            }
-          : video,
-      ),
-    )
-    updateCopyFeedback(key, '')
-  }, [updateCopyFeedback])
 
   const updatePointNote = useCallback(
     (videoKey: string, pointId: string, note: string) => {
-      setVideos((previous) =>
-        previous.map((video) =>
+      setVideos((previous) => {
+        const next = previous.map((video) =>
           video.key === videoKey
             ? {
                 ...video,
@@ -407,28 +376,70 @@ function App() {
                 ),
               }
             : video,
-        ),
-      )
-      updateCopyFeedback(videoKey, '')
+        )
+
+        const target = next.find((video) => video.key === videoKey)
+        if (target) {
+          logVideoPoints(videoKey, target.points)
+        }
+
+        return next
+      })
     },
-    [updateCopyFeedback],
+    [logVideoPoints],
   )
 
   const removePoint = useCallback(
     (videoKey: string, pointId: string) => {
-      setVideos((previous) =>
-        previous.map((video) =>
+      setVideos((previous) => {
+        const next = previous.map((video) =>
           video.key === videoKey
             ? {
                 ...video,
                 points: video.points.filter((point) => point.id !== pointId),
               }
             : video,
-        ),
-      )
-      updateCopyFeedback(videoKey, '')
+        )
+
+        const target = next.find((video) => video.key === videoKey)
+        if (target) {
+          logVideoPoints(videoKey, target.points)
+        }
+
+        return next
+      })
     },
-    [updateCopyFeedback],
+    [logVideoPoints],
+  )
+
+  const resumeVideoIfNeeded = useCallback(
+    (videoKey: string) => {
+      const player = playerRefs.current.get(videoKey)
+      if (player && activeVideoKey === videoKey) {
+        player.playVideo?.()
+      }
+    },
+    [activeVideoKey],
+  )
+
+  const startEditingPoint = useCallback((videoKey: string, pointId: string) => {
+    const player = playerRefs.current.get(videoKey)
+    player?.pauseVideo?.()
+    setEditingPoint({ videoKey, pointId })
+  }, [])
+
+  const stopEditingPoint = useCallback(
+    (videoKey: string, pointId: string) => {
+      setEditingPoint((previous) => {
+        if (previous && previous.videoKey === videoKey && previous.pointId === pointId) {
+          resumeVideoIfNeeded(videoKey)
+          return null
+        }
+
+        return previous
+      })
+    },
+    [resumeVideoIfNeeded],
   )
 
   const registerPoint = useCallback(
@@ -465,19 +476,27 @@ function App() {
           note: '',
         }
 
-        setVideos((previous) =>
-          previous.map((video) =>
+        setVideos((previous) => {
+          const next = previous.map((video) =>
             video.key === videoKey
               ? {
                   ...video,
                   points: [...video.points, newPoint].sort((a, b) => a.time - b.time),
                 }
               : video,
-          ),
-        )
-        updateCopyFeedback(videoKey, '')
+          )
+
+          const target = next.find((video) => video.key === videoKey)
+          if (target) {
+            logVideoPoints(videoKey, target.points)
+          }
+
+          return next
+        })
+
+        startEditingPoint(videoKey, id)
       },
-    [columns, rows, updateCopyFeedback],
+    [columns, rows, logVideoPoints, startEditingPoint],
   )
 
   const gridCellsForVideo = useCallback(
@@ -556,86 +575,64 @@ function App() {
                   data-active={activeVideoKey === video.key}
                 >
                   {gridCellsForVideo(video.key)}
-                  {activePoints.map((point) => (
-                    <div
-                      key={point.id}
-                      className="poi-marker"
-                      style={{
-                        left: `${point.xPercent}%`,
-                        top: `${point.yPercent}%`,
-                      }}
-                    >
-                      <span className="poi-callout__time">{formatTimecode(point.time)}</span>
-                      <span className="poi-callout__note">{point.note}</span>
-                    </div>
-                  ))}
+                  {activePoints.map((point) => {
+                    const isEditing =
+                      editingPoint?.videoKey === video.key && editingPoint.pointId === point.id
+
+                    return (
+                      <div
+                        key={point.id}
+                        className={isEditing ? 'poi-marker poi-marker--editing' : 'poi-marker'}
+                        style={{
+                          left: `${point.xPercent}%`,
+                          top: `${point.yPercent}%`,
+                        }}
+                      >
+                        <span className="poi-callout__time">{formatTimecode(point.time)}</span>
+                        {isEditing ? (
+                          <div className="poi-editor">
+                            <input
+                              autoFocus
+                              type="text"
+                              className="poi-editor__input"
+                              value={point.note}
+                              placeholder="Add a note"
+                              onChange={(event) =>
+                                updatePointNote(video.key, point.id, event.target.value)
+                              }
+                              onBlur={() => stopEditingPoint(video.key, point.id)}
+                            />
+                            <div className="poi-editor__actions">
+                              <button
+                                type="button"
+                                className="poi-editor__remove"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  stopEditingPoint(video.key, point.id)
+                                  removePoint(video.key, point.id)
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="poi-marker__trigger"
+                            onClick={() => startEditingPoint(video.key, point.id)}
+                          >
+                            <span className="poi-callout__note">
+                              {point.note ? point.note : 'Add a note'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
 
-              <div className="video-card__annotations">
-                <header className="annotations__header">
-                  <h2>Annotations</h2>
-                  <div className="annotations__actions">
-                    <button
-                      type="button"
-                      className="button"
-                      onClick={() => handleCopyPoints(video)}
-                      disabled={!video.points.length}
-                    >
-                      Copy JSON
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--danger"
-                      onClick={() => clearVideoPoints(video.key)}
-                      disabled={!video.points.length}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </header>
-
-                {copyFeedback[video.key] ? (
-                  <p className="annotations__feedback" role="status">
-                    {copyFeedback[video.key]}
-                  </p>
-                ) : null}
-
-                {video.points.length ? (
-                  <ul className="annotations__list">
-                    {video.points.map((point) => (
-                      <li key={point.id} className="annotations__item">
-                        <div className="annotations__time">
-                          <span>{formatTimecode(point.time)}</span>
-                          <span>
-                            Row {point.row} · Col {point.column}
-                          </span>
-                        </div>
-                        <input
-                          type="text"
-                          className="field__input field__input--inline"
-                          value={point.note}
-                          placeholder="Add a note"
-                          onChange={(event) =>
-                            updatePointNote(video.key, point.id, event.target.value)
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="button button--danger"
-                          onClick={() => removePoint(video.key, point.id)}
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="annotations__empty">
-                    Tap anywhere on the grid to capture a point of interest.
-                  </p>
-                )}
-              </div>
             </section>
           )
         })}
