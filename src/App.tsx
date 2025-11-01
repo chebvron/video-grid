@@ -20,35 +20,27 @@ type PointOfInterest = {
   note: string
 }
 
-type VideoOrientation = 'landscape' | 'portrait'
-
 type VideoItem = {
   id: string
   videoId: string
   source: string
-  orientation: VideoOrientation
 }
 
 const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'
 const DEFAULT_VIDEO_URL = `https://www.youtube.com/watch?v=${DEFAULT_VIDEO_ID}`
 const MIN_GRID_SIZE = 1
 const MAX_GRID_SIZE = 12
-const ORIENTATION_PADDING: Record<VideoOrientation, string> = {
-  landscape: '56.25%',
-  portrait: '177.78%',
-}
+const PORTRAIT_ASPECT_RATIO = '177.78%'
 
 const DEFAULT_FEED: Array<Omit<VideoItem, 'id'>> = [
-  { videoId: DEFAULT_VIDEO_ID, source: DEFAULT_VIDEO_URL, orientation: 'landscape' },
+  { videoId: DEFAULT_VIDEO_ID, source: DEFAULT_VIDEO_URL },
   {
     videoId: 'aqz-KE-bpKQ',
     source: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
-    orientation: 'landscape',
   },
   {
     videoId: '5qap5aO4i9A',
     source: 'https://www.youtube.com/watch?v=5qap5aO4i9A',
-    orientation: 'landscape',
   },
 ]
 
@@ -103,20 +95,10 @@ const formatTimecode = (seconds: number): string => {
   return `${minutes}:${paddedSeconds}.${paddedMilliseconds}`
 }
 
-const detectOrientationFromInput = (input: string): VideoOrientation => {
-  const lowered = input.toLowerCase()
-  if (lowered.includes('/shorts/')) {
-    return 'portrait'
-  }
-
-  return 'landscape'
-}
-
 function App() {
   const [videos, setVideos] = useState<VideoItem[]>(() =>
     DEFAULT_FEED.map((video, index) => ({
       ...video,
-      orientation: detectOrientationFromInput(video.source),
       id: `default-${index + 1}`,
     })),
   )
@@ -252,14 +234,12 @@ function App() {
       return
     }
 
-    const orientation = detectOrientationFromInput(videoInput)
     setVideos((previous) => [
       ...previous,
       {
         id: `video-${Date.now()}`,
         videoId: id,
         source: videoInput.trim(),
-        orientation,
       },
     ])
     setVideoInput('')
@@ -467,11 +447,8 @@ function App() {
                   onClick={() => setActiveVideoId(video.videoId)}
                   role="presentation"
                 >
-                  <div className={`player-shell player-shell--${video.orientation}`}>
-                    <div
-                      className="player-frame"
-                      style={{ paddingTop: ORIENTATION_PADDING[video.orientation] }}
-                    >
+                  <div className="player-shell">
+                    <div className="player-frame" style={{ paddingTop: PORTRAIT_ASPECT_RATIO }}>
                       <YouTube
                         videoId={video.videoId}
                         opts={youTubeOptions}
@@ -682,29 +659,9 @@ function App() {
                 </button>
               </div>
               {activeVideo ? (
-                <label className="field field--orientation">
-                  <span className="field__label">Orientation for active video</span>
-                  <select
-                    className="field__input"
-                    value={activeVideo.orientation}
-                    onChange={(event) => {
-                      const newOrientation = event.target.value as VideoOrientation
-                      setVideos((previous) =>
-                        previous.map((video) =>
-                          video.videoId === activeVideo.videoId
-                            ? {
-                                ...video,
-                                orientation: newOrientation,
-                              }
-                            : video,
-                        ),
-                      )
-                    }}
-                  >
-                    <option value="landscape">Landscape (16:9)</option>
-                    <option value="portrait">Vertical (9:16)</option>
-                  </select>
-                </label>
+                <p className="helper helper--muted">
+                  Videos are optimized for vertical (9:16) playback.
+                </p>
               ) : null}
             </section>
 
