@@ -534,6 +534,17 @@ function App() {
           const activePoints = video.points.filter(
             (point) => Math.abs(point.time - playback.currentTime) <= VISIBLE_POINT_WINDOW / 2,
           )
+          const timelineMarkers = playback.duration
+            ? video.points.map((point) => ({
+                id: point.id,
+                left: (point.time / playback.duration) * 100,
+                isActive:
+                  Math.abs(point.time - playback.currentTime) <= VISIBLE_POINT_WINDOW / 2,
+              }))
+            : []
+          const progressPercent = playback.duration
+            ? Math.min(100, Math.max(0, (playback.currentTime / playback.duration) * 100))
+            : 0
 
           return (
             <section
@@ -632,6 +643,28 @@ function App() {
                   })}
                 </div>
               </div>
+
+              {playback.duration > 0 ? (
+                <div className="timeline" aria-hidden="true">
+                  <div className="timeline__track">
+                    <div
+                      className="timeline__progress"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                    {timelineMarkers.map((marker) => (
+                      <div
+                        key={marker.id}
+                        className={
+                          marker.isActive
+                            ? 'timeline__marker timeline__marker--active'
+                            : 'timeline__marker'
+                        }
+                        style={{ left: `${marker.left}%` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
             </section>
           )

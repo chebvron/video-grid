@@ -101,6 +101,45 @@
   border: 0;
 }
 
+.timeline {
+  margin-top: 1rem;
+}
+
+.timeline__track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.35);
+  overflow: hidden;
+}
+
+.timeline__progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+}
+
+.timeline__marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: #f8fafc;
+  border: 2px solid rgba(30, 41, 59, 0.8);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.25);
+}
+
+.timeline__marker--active {
+  background: #6366f1;
+  border-color: #312e81;
+  box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3);
+}
+
 .video-grid {
   position: absolute;
   inset: 0;
