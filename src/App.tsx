@@ -26,8 +26,10 @@ type PlaybackState = {
 }
 
 const GRID_PADDING_PERCENT = '177.78%'
-const MIN_GRID_SIZE = 1
-const MAX_GRID_SIZE = 12
+const MIN_GRID_ROWS = 1
+const MAX_GRID_ROWS = 24
+const MIN_GRID_COLUMNS = 1
+const MAX_GRID_COLUMNS = 12
 const VISIBLE_POINT_WINDOW = 1.5
 
 const DEFAULT_VIDEO_IDS = ['tVlzKzKXjRw', 'aqz-KE-bpKQ', 'M7lc1UVf-VE']
@@ -97,8 +99,8 @@ function App() {
   const [videos, setVideos] = useState<VideoTrack[]>(
     DEFAULT_VIDEO_IDS.map((id) => createVideoTrack(id, `https://www.youtube.com/watch?v=${id}`)),
   )
-  const [rows, setRows] = useState(6)
-  const [columns, setColumns] = useState(4)
+  const [rows, setRows] = useState(24)
+  const [columns, setColumns] = useState(12)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [videoInput, setVideoInput] = useState('')
   const [videoError, setVideoError] = useState<string | null>(null)
@@ -342,14 +344,18 @@ function App() {
   )
 
   const handleDimensionChange = useCallback(
-    (setter: React.Dispatch<React.SetStateAction<number>>) =>
+    (
+      setter: React.Dispatch<React.SetStateAction<number>>,
+      min: number,
+      max: number,
+    ) =>
       (event: React.ChangeEvent<HTMLInputElement>) => {
         const value = Number.parseInt(event.target.value, 10)
         if (Number.isNaN(value)) {
           return
         }
 
-        const clamped = Math.min(MAX_GRID_SIZE, Math.max(MIN_GRID_SIZE, value))
+        const clamped = Math.min(max, Math.max(min, value))
         setter(clamped)
       },
     [],
@@ -722,10 +728,10 @@ function App() {
                 <span className="field__label">Rows</span>
                 <input
                   type="number"
-                  min={MIN_GRID_SIZE}
-                  max={MAX_GRID_SIZE}
+                  min={MIN_GRID_ROWS}
+                  max={MAX_GRID_ROWS}
                   value={rows}
-                  onChange={handleDimensionChange(setRows)}
+                  onChange={handleDimensionChange(setRows, MIN_GRID_ROWS, MAX_GRID_ROWS)}
                   className="field__input"
                 />
               </label>
@@ -733,10 +739,14 @@ function App() {
                 <span className="field__label">Columns</span>
                 <input
                   type="number"
-                  min={MIN_GRID_SIZE}
-                  max={MAX_GRID_SIZE}
+                  min={MIN_GRID_COLUMNS}
+                  max={MAX_GRID_COLUMNS}
                   value={columns}
-                  onChange={handleDimensionChange(setColumns)}
+                  onChange={handleDimensionChange(
+                    setColumns,
+                    MIN_GRID_COLUMNS,
+                    MAX_GRID_COLUMNS,
+                  )}
                   className="field__input"
                 />
               </label>
